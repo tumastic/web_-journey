@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>贪吃蛇游戏</title>
+    <style>
+        .container {
+            display: flex;
+            padding: 20px;
+            gap: 20px;
+        }
+
+        /* 左侧控制面板样式 */
+        .control-panel {
+            width: 200px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .control-panel > div {
+            margin-bottom: 15px;
+        }
+
+        .control-panel button {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: none;
+            border-radius: 4px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+        }
+
+        .control-panel button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .control-panel button:hover:not(:disabled) {
+            background: #45a049;
+        }
+
+        .test-mode {
+            padding: 10px 0;
+            display: none;
+        }
+
+        .test-mode.show {
+            display: block;
+        }
+
+        .test-mode input[type="number"] {
+            width: 100%;
+            padding: 5px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        /* 游戏主体部分样式 */
+        .game-container {
+            text-align: center;
+        }
+
+        #gameCanvas {
+            border: 2px solid black;
+            margin-top: 10px;
+        }
+
+        #score {
+            font-size: 24px;
+            margin: 10px;
+        }
+
+        #gameStatus {
+            font-size: 18px;
+            margin: 10px;
+            color: #666;
+        }
+
+        .game-tips {
+            margin: 10px;
+            color: #666;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 左侧控制面板 -->
+        <div class="control-panel">
+            <div>
+                <h3>游戏控制</h3>
+                <button id="startBtn">开始游戏</button>
+                <button id="endBtn">结束游戏</button>
+            </div>
+            
+            <div>
+                <label>
+                    <input type="checkbox" id="testModeSwitch"> 开启测试模式
+                </label>
+            </div>
+            
+            <div class="test-mode" id="testModePanel">
+                <label>
+                    测试分数：
+                    <input type="number" id="testScore" min="0" value="0">
+                </label>
+            </div>
+
+            <div class="game-info">
+                <h3>游戏说明</h3>
+                <p>- 空格键：开始/暂停游戏</p>
+                <p>- 方向键：控制蛇的移动</p>
+                <p>- 红色豆子：1分</p>
+                <p>- 黑色豆子：-1分</p>
+                <p>- 金色豆子：5分</p>
+            </div>
+        </div>
+
+        <!-- 游戏主体部分 -->
+        <div class="game-container">
+            <div id="score">得分：0</div>
+            <div id="gameStatus">按空格键开始/暂停游戏</div>
+            <canvas id="gameCanvas" width="400" height="400"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const endBtn = document.getElementById('endBtn');
+        const gridSize = 20;
+        
+        let snake = [];
+        let foods = [];
+        let direction = 'right';
+        let score = 0;
+        let gameSpeed = 150;
+        let gameLoop;
+        let isGameRunning = false;
+        let isPaused = false;
+        const testModeSwitch = document.getElementById('testModeSwitch');
+        const testModePanel = document.getElementById('testModePanel');
+        const testScoreInput = document.getElementById('testScore');
+        let isTestMode = false;
+
+        // 测试模式开关处理
+        testModeSwitch.addEventListener('change', function() {
+            isTestMode = this.checked;
+            testModePanel.classList.toggle('show', isTestMode);
+        });
+
+        // 修改获取随机食物类型的函数
+        function getRandomFoodType() {
+            // 只返回红色或金色豆子
+            const normalFoodTypes = [
+                { color: 'red', score: 1, probability: 0.9 },
+                { color: 'gold', score: 5, probability: 0.1 }
+            ];
+            
+            const rand = Math.random();
+            let probabilitySum = 0;
+            
+            for (const type of normalFoodTypes) {
+                probabilitySum += type.probability;
+                if (rand <= probabilitySum) {
+                    return type;
+                }
+            }
+            return normalFoodTypes[0]; // 默认返回红色豆子
+        }
+
+        // 修改创建食物函数
+        function createFood(type = null) {
+            let newX, newY;
+            let isValidPosition;
+            
+            do {
+                isValidPosition = true;
+                newX = Math.floor(Math.random() * (canvas.width / gridSize));
+                newY = Math.floor(Math.random() * (canvas.height / gridSize));
+                
+                // 检查是否与蛇身重叠
+                if (snake.some(segment => segment.x === newX && segment.y === newY)) {
+                    isValidPosition = false;
+                    continue;
+                }
+                
+                // 检查是否与其他食物重叠
+                if (foods.some(food => food.x === newX && food.y === newY)) {
+                    isValidPosition = false;
+                    continue;
+                }
+            } while (!isValidPosition);
+
+            const newFood = {
+                x: newX,
+                y: newY,
+                type: type || getRandomFoodType()
+            };
+
+            foods.push(newFood);
+        }
+
+        // 修改初始化游戏函数
+        function initGame() {
+            snake = [
+                {x: 10, y: 10},
+                {x: 9, y: 10},
+                {x: 8, y: 10}
+            ];
+            direction = 'right';
+            
+            // 根据测试模式设置初始分数
+            if (isTestMode && testScoreInput.value) {
+                score = parseInt(testScoreInput.value);
+            } else {
+                score = 0;
+            }
+            
+            foods = [];
+            document.getElementById('score').textContent = `得分：${score}`;
+            createFood();
+            draw();
+        }
+
+        // 修改移动蛇函数
+        function moveSnake() {
+            if (!isGameRunning || isPaused) return;
+
+            const head = {...snake[0]};
+            
+            switch(direction) {
+                case 'up': head.y--; break;
+                case 'down': head.y++; break;
+                case 'left': head.x--; break;
+                case 'right': head.x++; break;
+            }
+
+            // 检查是否吃到食物
+            const eatenFoodIndex = foods.findIndex(food => 
+                food.x === head.x && food.y === head.y
+            );
+
+            if (eatenFoodIndex !== -1) {
+                // 更新分数
+                const eatenFood = foods[eatenFoodIndex];
+                const oldScore = score;
+                score += eatenFood.type.score;
+                document.getElementById('score').textContent = `得分：${score}`;
+                
+                // 增加蛇的长度
+                snake.push({});
+
+                // 检查是否是特殊豆子场景（两个豆子��存在）
+                if (foods.length === 2 && 
+                    foods.some(f => f.type.color === 'black') && 
+                    foods.some(f => f.type.color === 'gold')) {
+                    // 清除所有食物
+                    foods = [];
+                    // 创建新的普通食物
+                    createFood();
+                } else {
+                    // 普通场景，只移除被吃掉的食物
+                    foods.splice(eatenFoodIndex, 1);
+                    
+                    // 检查是否需要生成特殊豆子
+                    if (Math.floor(score / 10) > Math.floor(oldScore / 10)) {
+                        // 清除所有现有食物
+                        foods = [];
+                        // 创建黑色和金色豆子
+                        createFood({ color: 'black', score: -1 });
+                        createFood({ color: 'gold', score: 5 });
+                    } else if (foods.length === 0) {
+                        // 如果没有食物，创建一个普通食物
+                        createFood();
+                    }
+                }
+            } else {
+                snake.pop();
+            }
+
+            // 检查游戏是否结束
+            if (head.x < 0 || head.x >= canvas.width / gridSize ||
+                head.y < 0 || head.y >= canvas.height / gridSize ||
+                snake.some(segment => segment.x === head.x && segment.y === head.y)) {
+                endGame();
+                return;
+            }
+
+            snake.unshift(head);
+            draw();
+        }
+
+        // 键盘控制
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'Space') {
+                event.preventDefault();
+                if (!isGameRunning) {
+                    startGame();
+                } else {
+                    togglePause();
+                }
+                return;
+            }
+            
+            if (!isGameRunning || isPaused) return;
+            
+            switch(event.key) {
+                case 'ArrowUp':
+                    if (direction !== 'down') direction = 'up';
+                    break;
+                case 'ArrowDown':
+                    if (direction !== 'up') direction = 'down';
+                    break;
+                case 'ArrowLeft':
+                    if (direction !== 'right') direction = 'left';
+                    break;
+                case 'ArrowRight':
+                    if (direction !== 'left') direction = 'right';
+                    break;
+            }
+        });
+
+        // 按钮事件监听
+        startBtn.addEventListener('click', startGame);
+        endBtn.addEventListener('click', endGame);
+
+        // 初始状态设置
+        endBtn.disabled = true;
+        const gameStatusElement = document.getElementById('gameStatus');
+
+        // 修改绘制函数，让蛇更卡通
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 画蛇
+            snake.forEach((segment, index) => {
+                const x = segment.x * gridSize;
+                const y = segment.y * gridSize;
+                const size = gridSize - 2;
+                
+                // 绘制圆形身体
+                ctx.beginPath();
+                ctx.fillStyle = '#4CAF50'; // 鲜艳的绿色
+                ctx.arc(x + size/2, y + size/2, size/2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 添加身体渐变效果
+                const gradient = ctx.createRadialGradient(
+                    x + size/2, y + size/2, size/6,
+                    x + size/2, y + size/2, size/2
+                );
+                gradient.addColorStop(0, '#7FBA00'); // 浅绿色中心
+                gradient.addColorStop(1, '#4CAF50'); // 深绿色边缘
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                // 如果是蛇头，添加眼睛和其他细节
+                if (index === 0) {
+                    // 确定蛇头朝向
+                    let eyeX1, eyeX2, eyeY;
+                    let mouthX, mouthY;
+                    
+                    switch(direction) {
+                        case 'right':
+                            eyeX1 = x + size * 3/4;
+                            eyeX2 = eyeX1;
+                            eyeY = y + size/3;
+                            mouthX = x + size - 2;
+                            mouthY = y + size/2;
+                            break;
+                        case 'left':
+                            eyeX1 = x + size/4;
+                            eyeX2 = eyeX1;
+                            eyeY = y + size/3;
+                            mouthX = x + 2;
+                            mouthY = y + size/2;
+                            break;
+                        case 'up':
+                            eyeX1 = x + size/3;
+                            eyeX2 = x + size * 2/3;
+                            eyeY = y + size/4;
+                            mouthX = x + size/2;
+                            mouthY = y + 2;
+                            break;
+                        case 'down':
+                            eyeX1 = x + size/3;
+                            eyeX2 = x + size * 2/3;
+                            eyeY = y + size * 3/4;
+                            mouthX = x + size/2;
+                            mouthY = y + size - 2;
+                            break;
+                    }
+                    
+                    // 绘制眼睛
+                    ctx.fillStyle = 'white';
+                    ctx.beginPath();
+                    ctx.arc(eyeX1, eyeY, 3, 0, Math.PI * 2);
+                    ctx.arc(eyeX2, eyeY, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // 绘制眼球
+                    ctx.fillStyle = 'black';
+                    ctx.beginPath();
+                    ctx.arc(eyeX1, eyeY, 1.5, 0, Math.PI * 2);
+                    ctx.arc(eyeX2, eyeY, 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // 给相邻段之间添加连接效果
+                if (index < snake.length - 1) {
+                    const nextSegment = snake[index + 1];
+                    const midX = (x + nextSegment.x * gridSize + size) / 2;
+                    const midY = (y + nextSegment.y * gridSize + size) / 2;
+                    
+                    ctx.beginPath();
+                    ctx.fillStyle = '#4CAF50';
+                    ctx.arc(midX, midY, size/2 - 1, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            
+            // 画食物
+            foods.forEach(food => {
+                const x = food.x * gridSize;
+                const y = food.y * gridSize;
+                const size = gridSize - 2;
+                
+                ctx.beginPath();
+                
+                // 根据食物类型设置不同的样式
+                switch(food.type.color) {
+                    case 'red':
+                        // 红色苹果样式
+                        ctx.fillStyle = '#FF0000';
+                        ctx.arc(x + size/2, y + size/2, size/2, 0, Math.PI * 2);
+                        ctx.fill();
+                        // 添加苹果叶子
+                        ctx.fillStyle = '#32CD32';
+                        ctx.fillRect(x + size/2 - 2, y + 2, 4, 4);
+                        break;
+                        
+                    case 'gold':
+                        // 金色星星样式
+                        ctx.fillStyle = '#FFD700';
+                        const spikes = 5;
+                        const outerRadius = size/2;
+                        const innerRadius = size/4;
+                        
+                        for(let i = 0; i < spikes * 2; i++) {
+                            const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                            const angle = (i * Math.PI) / spikes;
+                            if(i === 0) {
+                                ctx.moveTo(x + size/2 + radius * Math.cos(angle), 
+                                         y + size/2 + radius * Math.sin(angle));
+                            } else {
+                                ctx.lineTo(x + size/2 + radius * Math.cos(angle), 
+                                         y + size/2 + radius * Math.sin(angle));
+                            }
+                        }
+                        ctx.closePath();
+                        ctx.fill();
+                        break;
+                        
+                    case 'black':
+                        // 黑色炸弹样式
+                        ctx.fillStyle = '#000000';
+                        ctx.arc(x + size/2, y + size/2, size/2, 0, Math.PI * 2);
+                        ctx.fill();
+                        // 添加导火线
+                        ctx.strokeStyle = '#FF4500';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(x + size/2, y + 2);
+                        ctx.lineTo(x + size/2 + 4, y - 2);
+                        ctx.stroke();
+                        break;
+                }
+            });
+        }
+
+        // 开始游戏
+        function startGame() {
+            if (!isGameRunning) {
+                initGame();
+                isGameRunning = true;
+                isPaused = false;
+                gameLoop = setInterval(moveSnake, gameSpeed);
+                startBtn.disabled = true;
+                endBtn.disabled = false;
+                gameStatusElement.textContent = "按空格键暂停/继续游戏";
+            }
+        }
+
+        // 结束游戏
+        function endGame() {
+            if (isGameRunning) {
+                clearInterval(gameLoop);
+                isGameRunning = false;
+                isPaused = false;
+                alert(`游戏结束！最终得分：${score}`);
+                startBtn.disabled = false;
+                endBtn.disabled = true;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                gameStatusElement.textContent = "按空格键开始游戏";
+            }
+        }
+
+        // 暂停/继续游戏
+        function togglePause() {
+            if (!isGameRunning) return;
+            
+            isPaused = !isPaused;
+            if (isPaused) {
+                clearInterval(gameLoop);
+                gameStatusElement.textContent = "游戏已暂停，按空格继续";
+            } else {
+                gameLoop = setInterval(moveSnake, gameSpeed);
+                gameStatusElement.textContent = "按空格键暂停/继续游戏";
+            }
+        }
+    </script>
+</body>
+</html> 
